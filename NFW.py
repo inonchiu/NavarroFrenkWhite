@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-
 ##################################################################
 #
 # This module is the class of Navarro-Frenk-White Model.
@@ -149,9 +148,6 @@ def MXXXtoMYYY(redshift =   0.3,
     RYYY = CYYY * rs
 
     return np.array([ MXXX, CXXX, RXXX, MYYY, CYYY, RYYY, rhos, rs ], dtype=float)
-
-
-
 
 
 # ---
@@ -584,14 +580,10 @@ class Halo(object):
             insideF = (1.0 - X)/(1.0 + X)
             return np.log(X/2.0) + 2.0 / np.sqrt(1.0 - X**2) * np.arctanh( np.sqrt(insideF) )
 
-            #insideF = (1.0 - X)/(1.0 + X)
-            #return 1.0 / (1.0 - X**2) * ( -1.0 + 2.0/np.sqrt(1.0-X**2) * np.arctanh( np.sqrt(insideF) ) )
-
         def factor_larger_than_one(X):
             X       = np.array(X, ndmin=1)
             insideF = (X - 1.0)/(1.0 + X)
             return np.log(X/2.0) + 2.0 / np.sqrt(X**2 - 1.0) * np.arctan( np.sqrt(insideF) )
-            #return 1.0 / (X**2 - 1.0) * (  1.0 - 2.0/np.sqrt(X**2-1.0) * np.arctan(  np.sqrt(insideF) ) )
 
         # calculate the profile
         profile_smaller_than_one     =      factor_smaller_than_one(X = rmpc/self.rs)
@@ -722,7 +714,7 @@ class Halo(object):
 
 
     # ---
-    # magnification factor in the weak lensing regome - mu_weak
+    # magnification factor in the weak lensing regime - mu_weak
     # ---
     def mu_weak(self, rmpc, zs = 1.0, beta = None):
         """
