@@ -23,7 +23,7 @@ cosmo           =       cosdist.set_omega_k_0(cosmo)
 # ---
 # Define the vir_overden
 # ---
-def calc_vir_overden(zd, **cosmo):
+def calc_vir_overden(zd, cosmo = cosmo):
     """
     This is the overdensity wrt to mean density of the Universe at redshift zd when the halo is viriliazed.
     This is a fitting formula given in equation C19 in Nakamura and Suto (1997).
@@ -123,7 +123,7 @@ def MXXXtoMYYY(redshift =   0.3,
             return XXX * \
                    cosdens.cosmo_densities(**cosmo)[0] * cosdist.e_z(redshift, **cosmo)**2 * cosdens.omega_M_z(redshift, **cosmo)
         elif   wrt   ==    "vir":
-            return calc_vir_overden(redshift, **cosmo) * \
+            return calc_vir_overden(zd = redshift, cosmo = cosmo) * \
                    cosdens.cosmo_densities(**cosmo)[0] * cosdist.e_z(redshift, **cosmo)**2 * cosdens.omega_M_z(redshift, **cosmo)
 
     # Solve rhos Msun/Mpc^3
@@ -248,7 +248,7 @@ class Halo(object):
         self.overden    =       float(overden)
         self.wrt        =       str(wrt)
         self.cosmo      =       cosdist.set_omega_k_0(cosmo)                # set cosmology
-        self.vir_overden=       calc_vir_overden(self.zd, **self.cosmo)     # calculate virialized overden
+        self.vir_overden=       calc_vir_overden(zd = self.zd, cosmo = self.cosmo)     # calculate virialized overden
 
         # cosmology properties
         self.da         =       cosdist.angular_diameter_distance(self.zd, **self.cosmo)
