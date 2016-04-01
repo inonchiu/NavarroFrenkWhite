@@ -92,7 +92,7 @@ def MXXXtoMYYY(redshift =   0.3,
         -`MYYY`: float, the output halo mass in the unit of Msun.
         -`CYYY`: float, the output concentration.
         -`RYYY`: float, the radius for the output halo mass in the unit of Mpc.
-        -`rhos`: float, the normalization of the NFW model (g/cm^3)
+        -`rhos`: float, the normalization of the NFW model (Msun/Mpc^3)
         -`rs`: float, the core radius of the NFW model (Mpc).
 
     """
