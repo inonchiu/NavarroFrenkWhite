@@ -97,7 +97,7 @@ def MXXXtoMYYY(redshift =   0.3,
 
     """
     # sanitiy check
-    if  not ( (redshift > 0.0) and (MXXX > 0.0) and (CXXX > 0.0) ):
+    if  not ( (redshift >= 0.0) and (MXXX > 0.0) and (CXXX > 0.0) ):
         raise ValueError("The input halo params are wrong, (redshift, MXXX, CXXX):", redshift, MXXX, CXXX, ".")
 
     # sanity check on wrt
