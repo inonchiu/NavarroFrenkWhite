@@ -8,7 +8,13 @@ This is a module for basic calculation regarding the **Navarro–Frenk–White**
 
 ### Installation
 
-To use this module, just add ``NFW.py`` to your ``PYTHONPATH`` and invoke the following.
+To use this module, just add ``NFW.py`` to your ``PYTHONPATH``, or installing it via pip:
+
+```
+pip install git+git://github.com/inonchiu/NavarroFrenkWhite.git
+```
+
+To use it, just invoking the following.
 
 ```
 import NFW
