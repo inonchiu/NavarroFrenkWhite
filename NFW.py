@@ -17,7 +17,7 @@ import scipy.integrate as integrate
 # ---
 # Set a default cosmology
 # ---
-cosmo           =       cosmo = {'omega_M_0' : 0.3, 'omega_lambda_0' : 0.7, 'h' : 0.7}
+cosmo           =       {'omega_M_0' : 0.3, 'omega_lambda_0' : 0.7, 'h' : 0.7}
 cosmo           =       cosdist.set_omega_k_0(cosmo)
 
 # ---
