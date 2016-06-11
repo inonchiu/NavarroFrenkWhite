@@ -525,7 +525,7 @@ class Halo(object):
             -`KappaAtR`: float or 1d numpy array, the projected surface mass density at rmpc
         """
         # the normalization
-        crit_den        =   self.Sigma_crit(zs = zs, beta = None)
+        crit_den        =   self.Sigma_crit(zs = zs, beta = beta)
         Norm            =   2.0 * self.rhos * self.rs / crit_den
 
         # define internal functions
@@ -571,7 +571,7 @@ class Halo(object):
             -`KappaBar`: float or 1d numpy array, the average projected surface mass density within rmpc.
         """
         # the normalization
-        crit_den        =   self.Sigma_crit(zs = zs, beta = None)
+        crit_den        =   self.Sigma_crit(zs = zs, beta = beta)
         Norm            =   2.0 * self.rhos * self.rs / crit_den
 
         # define internal functions
