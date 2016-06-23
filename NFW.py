@@ -13,6 +13,8 @@ import cosmolopy.density as cosdens
 import cosmolopy.constants as cosconst
 import scipy.optimize as optimize
 import scipy.integrate as integrate
+import scipy.stats as stats
+import scipy.interpolate as interpolate
 
 # ---
 # Set a default cosmology
@@ -191,6 +193,51 @@ def DeprojectFactor(concen):
     return numerator / denominator
 
 
+# ---
+# Offset distribution
+# ---
+def Poffset(rmpc_offset, mis_type = "zitrin+12"):
+    """
+    This function describes the mis-centering of galaxy clusters.
+
+    It returns the probability of the offset of the center proxy as a function of Mpc.
+
+    Parameters:
+        -`rmpc_offset`: float or 1d array. The radial offset in the unit of Mpc.
+        -`mis_type`: string. The functional form of offset distribution in different literature.
+
+    Return:
+        -`Poffset`: float or 1d array. The offset distribution.
+    """
+    # sanitize
+    if      mis_type    not in ["zitrin+12",]:
+        raise NameError("mis_type:", mis_type, "is not in the list.")
+    # sanitize
+    rmpc_offset    =   np.array(rmpc_offset, ndmin=1)
+
+    # Zitrin+12, 1208.1766v3
+    if    mis_type  ==  "zitrin+12":
+        # define P_zitrin
+        def P_zitrin(x):
+            """
+            In their Figure 5, it is lognormal distribution.
+
+            u := <log10(Delta)> = -1.895
+            and
+            sigma := sigma of log10(Delta) = 0.501
+
+            In linear space,
+
+            dP/dx = dP/dy * 1.0 / (log(10.0) * 10.0**y),
+            where y = log10(x)
+            """
+            y       =   np.log10(x)
+            dPdx    =   stats.norm.pdf(x = y, loc = -1.895, scale = 0.501) * 1.0 / (log(10.0) * 10.0**y)
+            return dPdx
+
+        return P_zitrin(x = rmpc_offset)
+
+    return
 
 ####################################
 #
@@ -524,6 +571,8 @@ class Halo(object):
         Return:
             -`KappaAtR`: float or 1d numpy array, the projected surface mass density at rmpc
         """
+        # sanitize
+        rmpc            =   np.array(rmpc, ndmin=1)
         # the normalization
         crit_den        =   self.Sigma_crit(zs = zs, beta = beta)
         Norm            =   2.0 * self.rhos * self.rs / crit_den
@@ -570,6 +619,8 @@ class Halo(object):
         Return:
             -`KappaBar`: float or 1d numpy array, the average projected surface mass density within rmpc.
         """
+        # sanitize
+        rmpc            =   np.array(rmpc, ndmin=1)
         # the normalization
         crit_den        =   self.Sigma_crit(zs = zs, beta = beta)
         Norm            =   2.0 * self.rhos * self.rs / crit_den
@@ -736,3 +787,376 @@ class Halo(object):
         return 1.0 + 2.0 * self.KappaAtR(rmpc, zs = zs, beta = beta)
 
 
+    # ---
+    # Miscentered Dimensionless projected surface mass density - _misKappaAtR
+    # ---
+    def _misKappaAtR(self, rmpc, rmpc_offset = 0.3, zs = 1.0, beta = None, ntheta = 2**10 + 2):
+        """
+        This function calculates the projected mass density at the scaled radius rmpc in the unit of Mpc. This is the Kappa at that radius __before__ convolving the Poffset.
+
+        It follows the formular in Jes Ford paper.
+
+        Parameters:
+            -`rmpc`: float or 1d numpy array, the radius in the unit of Mpc.
+            -`rmpc_offset`: float or 1d array, the radius offset in the unit of Mpc.
+            -`zs`: float, the redshift of the source.
+            -`beta`: float, the lensing efficiency.
+                     If it is None, then calculate the beta from zd and zs.
+            -`ntheta`: int. It is the number of bins for numerical integration.
+        Return:
+            -`KappaAtR`: float or 1d numpy array, the projected surface mass density at rmpc
+        """
+        # sanitize
+        rmpc        =   np.array(rmpc, ndmin=1)
+        rmpc_offset =   np.array(rmpc_offset, ndmin=1)
+        ntheta      =   int(ntheta)
+        nrmpc       =   len(rmpc)
+        nrmpc_offset=   len(rmpc_offset)
+        # theta
+        theta_edges =   np.linspace(0.0, 2.0 * pi, ntheta)
+        theta_bins  =   0.5 * ( theta_edges[1:] + theta_edges[:-1] )
+        theta_steps =   ( theta_edges[1:] - theta_edges[:-1] )
+        # meshgrid in the shape of (nrmpc, nrmpc_offset, ntheta - 1)
+        mesh_rmpc, mesh_rmpc_offset, mesh_theta_bins = np.meshgrid(rmpc, rmpc_offset, theta_bins , indexing = "ij")
+        _        ,                _, mesh_theta_steps= np.meshgrid(rmpc, rmpc_offset, theta_steps, indexing = "ij")
+        # define effect radius in the shape of ( nrmpc, nrmpc_offset, ntheta - 1 )
+        rmpc_eff    =   np.sqrt( mesh_rmpc**2 + mesh_rmpc_offset**2 - 2.0 * mesh_rmpc * mesh_rmpc_offset * np.cos(mesh_theta_bins) )
+        # calculate misKappa(R,Roffset,theta)
+        misKappa_R_Roffset_theta    =   self.KappaAtR(rmpc = rmpc_eff.flatten(), zs = zs, beta = beta).reshape( (nrmpc, nrmpc_offset, -1) )
+        # calculate misKappa(R,Roffset)
+        misKappaAtR                 =   np.sum( misKappa_R_Roffset_theta * mesh_theta_steps, axis = -1) / (2.0 * pi)
+        #misKappaAtR                 =   integrate.romb( misKappa_R_Roffset_theta * mesh_theta_steps, axis = -1) / (2.0 * pi)
+        # return - in the shape of ( nrmpc, nrmpc_offset)
+        return misKappaAtR
+
+
+
+    # ---
+    # Miscentered Dimensionless projected surface mass density - misKappaAtR
+    # ---
+    def misKappaAtR(self, rmpc, zs = 1.0, beta = None, rmpc_offset_lo = 1E-4, rmpc_offset_hi = 1E2, nrmpc_offset = 2**7 + 2, ntheta = 2**7 + 2, mis_type = "zitrin+12"):
+        """
+        This function calculates the projected mass density at the scaled radius rmpc in the unit of Mpc.
+
+        It follows the formular in Jes Ford paper.
+
+        Parameters:
+            -`rmpc`: float or 1d numpy array, the radius in the unit of Mpc.
+            -`rmpc_offset_lo`: float, the lower bound of integrating radius offset in the unit of Mpc.
+            -`rmpc_offset_hi`: float, the higher bound of integrating radius offset in the unit of Mpc.
+            -`nrmpc_offset`: int, the number of binning for integrating radius offset in the unit of Mpc.
+            -`zs`: float, the redshift of the source.
+            -`beta`: float, the lensing efficiency.
+                     If it is None, then calculate the beta from zd and zs.
+            -`ntheta`: int. It is the number of bins for numerical integration.
+            -`mis_type`: string. It is the miscentering function given by different literature. see Poffset(rmpc, mis_type).
+
+        Return:
+            -`KappaAtR`: float or 1d numpy array, the projected surface mass density at rmpc
+        """
+        # sanitize
+        rmpc              =   np.array(rmpc, ndmin=1)
+        rmpc_offset_edges =   10.0**np.linspace( log10(rmpc_offset_lo), log10(rmpc_offset_hi), nrmpc_offset )
+        rmpc_offset_bins  =   0.5 * ( rmpc_offset_edges[1:] + rmpc_offset_edges[:-1] )
+        rmpc_offset_steps =   ( rmpc_offset_edges[1:] - rmpc_offset_edges[:-1] )
+        ntheta            =   int(ntheta)
+        nrmpc             =   len(rmpc)
+        nrmpc_offset      =   len(rmpc_offset_bins)
+        # Poffset
+        Poff              =   Poffset(rmpc_offset = rmpc_offset_bins, mis_type = mis_type)
+        # _misKappaAtR
+        misKappa_at_R_Roffset   =   self._misKappaAtR(rmpc = rmpc, rmpc_offset = rmpc_offset_bins, zs = zs, beta = beta, ntheta = ntheta)
+        # integrating along rmpc_offset
+        misKappa_at_R           =   np.sum( misKappa_at_R_Roffset * Poff * rmpc_offset_steps, axis = 1)
+        #misKappa_at_R           =   integrate.romb( misKappa_at_R_Roffset * Poff * rmpc_offset_steps, axis = 1)
+        # return - in the shape of ( nrmpc, nrmpc_offset)
+        return misKappa_at_R
+
+
+
+    # ---
+    # Miscentered Dimensionless projected surface mass density - misKappaAtR
+    # ---
+    def misKappaBar(self, rmpc, zs = 1.0, beta = None, nrmpc = 2**8 + 2, rmpc_offset_lo = 1E-4, rmpc_offset_hi = 1E2, nrmpc_offset = 2**7 + 2, ntheta = 2**7 + 2, mis_type = "zitrin+12"):
+        """
+        This function calculates the average projected mass density within the scaled radius rmpc in the unit of Mpc.
+
+        It follows the formular in Jes Ford paper.
+
+        Parameters:
+            -`rmpc`: float or 1d numpy array, the radius in the unit of Mpc.
+            -`nrmpc`: int. The number of the bins used for integration.
+            -`rmpc_offset_lo`: float, the lower bound of integrating radius offset in the unit of Mpc.
+            -`rmpc_offset_hi`: float, the higher bound of integrating radius offset in the unit of Mpc.
+            -`nrmpc_offset`: int, the number of binning for integrating radius offset in the unit of Mpc.
+            -`zs`: float, the redshift of the source.
+            -`beta`: float, the lensing efficiency.
+                     If it is None, then calculate the beta from zd and zs.
+            -`ntheta`: int. It is the number of bins for numerical integration.
+            -`mis_type`: string. It is the miscentering function given by different literature. see Poffset(rmpc, mis_type).
+
+        Return:
+            -`KappaAtR`: float or 1d numpy array, the projected surface mass density at rmpc
+        """
+        # sanitize
+        rmpc              =   np.array(rmpc, ndmin=1)
+        nrmpc             =   int(nrmpc)
+        # rmpc binning for integration - this is hardcoded, and the result should be converged.
+        xx_edges        =   10.0**np.linspace( -6.0, 2.0, 2**10 + 2 )
+        xx_bins         =   0.5 * ( xx_edges[1:] + xx_edges[:-1] )
+        xx_steps        =   ( xx_edges[1:] - xx_edges[:-1] )
+        # derive the misKappaAtR - in the length of 2**int + 1
+        misKappa_at_R     =   self.misKappaAtR(rmpc = xx_bins, zs = zs, beta = beta, rmpc_offset_lo = rmpc_offset_lo, rmpc_offset_hi = rmpc_offset_hi, nrmpc_offset = nrmpc_offset, ntheta = ntheta, mis_type = mis_type)
+        # interpolate - using slinear
+        interpolate_f     =  interpolate.interp1d(xx_bins, misKappa_at_R, kind = "slinear")
+        ## define func
+        #def integrate_me(x):
+        #    return self.misKappaAtR(rmpc = x, zs = zs, beta = beta, rmpc_offset_lo = rmpc_offset_lo, rmpc_offset_hi = rmpc_offset_hi, nrmpc_offset = nrmpc_offset, ntheta = ntheta, mis_type = mis_type) * 2.0 * pi * x
+
+
+        # define a function to do romb integration
+        def integrate_me2(x):
+            # hardcode the inner boundary as 10**-5 Mpc - a sub galaxy scale should be more than enough...
+            new_xx_edges    =   10.0**np.linspace(-5.0, log10(x), nrmpc)
+            new_xx_bins     =   0.5 * ( new_xx_edges[1:] + new_xx_edges[:-1] )
+            new_xx_steps    =   ( new_xx_edges[1:] - new_xx_edges[:-1] )
+            return integrate.romb( ( interpolate_f(new_xx_bins) * 2 * pi * new_xx_bins * new_xx_steps) )
+
+        # calculate miscentered kappa bar - ok, I loop them, it can be faster if I dont.
+        misKappa_bar    =   np.array([ integrate_me2(x) for x in rmpc ]) / (rmpc**2 * pi)
+        # return
+        return misKappa_bar
+
+
+
+    # ---
+    # Tangential shear - gamma
+    # ---
+    def misTangentialShear(self, rmpc, zs = 1.0, beta = None, nrmpc = 2**8 + 2, rmpc_offset_lo = 1E-4, rmpc_offset_hi = 1E2, nrmpc_offset = 2**7 + 2, ntheta = 2**7 + 2, mis_type = "zitrin+12"):
+        """
+        This function calculates the tangential shear at the radius in the unit of Mpc - including the miscentering.
+
+        It follows the formular at Umetsu 2010 (astro-ph) and Ford+14.
+        You can specify the lensing efficiency or zs, yourself.
+
+        Parameters:
+            -`rmpc`: float or 1d numpy array, the radius in the unit of Mpc.
+            -`zs`: float, the redshift of the source.
+            -`beta`: float, the lensing efficiency.
+                     If it is None, then calculate the beta from zd and zs.
+            -`nrmpc`: int. The number of the bins used for integration.
+            -`rmpc_offset_lo`: float, the lower bound of integrating radius offset in the unit of Mpc.
+            -`rmpc_offset_hi`: float, the higher bound of integrating radius offset in the unit of Mpc.
+            -`nrmpc_offset`: int, the number of binning for integrating radius offset in the unit of Mpc.
+            -`zs`: float, the redshift of the source.
+            -`beta`: float, the lensing efficiency.
+                     If it is None, then calculate the beta from zd and zs.
+            -`ntheta`: int. It is the number of bins for numerical integration.
+            -`mis_type`: string. It is the miscentering function given by different literature. see Poffset(rmpc, mis_type).
+
+
+        Return:
+            -`TangentialShear`: float or 1d numpy array, the tangential shear at rmpc.
+
+        """
+        return ( self.misKappaBar(rmpc, zs = zs, beta = beta, nrmpc = nrmpc, rmpc_offset_lo = rmpc_offset_lo, rmpc_offset_hi = rmpc_offset_hi, nrmpc_offset = nrmpc_offset, ntheta = ntheta, mis_type = mis_type) - \
+                self.misKappaAtR(rmpc, zs = zs, beta = beta, rmpc_offset_lo = rmpc_offset_lo, rmpc_offset_hi = rmpc_offset_hi, nrmpc_offset = nrmpc_offset, ntheta = ntheta, mis_type = mis_type) )
+
+    # ---
+    # Reduced shear - g := gamma / (1 - kappa)
+    # ---
+    def misReducedShear(self, rmpc, zs = 1.0, beta = None, nrmpc = 2**8 + 2, rmpc_offset_lo = 1E-4, rmpc_offset_hi = 1E2, nrmpc_offset = 2**7 + 2, ntheta = 2**7 + 2, mis_type = "zitrin+12"):
+        """
+        This function calculates the reduced shear at the radius in the unit of Mpc - including miscentering.
+
+        It follows the formular at Umetsu 2010 (astro-ph) and Ford+14.
+        You can specify the lensing efficiency or zs, yourself.
+
+        Parameters:
+            -`rmpc`: float or 1d numpy array, the radius in the unit of Mpc.
+            -`zs`: float, the redshift of the source.
+            -`beta`: float, the lensing efficiency.
+                     If it is None, then calculate the beta from zd and zs.
+            -`nrmpc`: int. The number of the bins used for integration.
+            -`rmpc_offset_lo`: float, the lower bound of integrating radius offset in the unit of Mpc.
+            -`rmpc_offset_hi`: float, the higher bound of integrating radius offset in the unit of Mpc.
+            -`nrmpc_offset`: int, the number of binning for integrating radius offset in the unit of Mpc.
+            -`zs`: float, the redshift of the source.
+            -`beta`: float, the lensing efficiency.
+                     If it is None, then calculate the beta from zd and zs.
+            -`ntheta`: int. It is the number of bins for numerical integration.
+            -`mis_type`: string. It is the miscentering function given by different literature. see Poffset(rmpc, mis_type).
+
+        Return:
+            -`ReducedShear`: float or 1d numpy array, the tangential shear at rmpc.
+
+        """
+        return self.misTangentialShear(rmpc, zs = zs, beta = beta, nrmpc = nrmpc, rmpc_offset_lo = rmpc_offset_lo, rmpc_offset_hi = rmpc_offset_hi, nrmpc_offset = nrmpc_offset, ntheta = ntheta, mis_type = mis_type) / \
+                (1.0 - self.misKappaAtR(rmpc, zs = zs, beta = beta, rmpc_offset_lo = rmpc_offset_lo, rmpc_offset_hi = rmpc_offset_hi, nrmpc_offset = nrmpc_offset, ntheta = ntheta, mis_type = mis_type) )
+
+
+    # ---
+    # det of Jacobian - the exact form
+    # ---
+    def misDetJ(self, rmpc, zs = 1.0, beta = None, nrmpc = 2**8 + 2, rmpc_offset_lo = 1E-4, rmpc_offset_hi = 1E2, nrmpc_offset = 2**7 + 2, ntheta = 2**7 + 2, mis_type = "zitrin+12"):
+        """
+        This function calculates the det(Jacobian) at the radius in the unit of Mpc - including miscentering.
+
+        It returns det(J) = (1.0 - Kappa)**2 - tangential**2
+        You can specify the lensing efficiency or zs, yourself.
+
+        Parameters:
+            -`rmpc`: float or 1d numpy array, the radius in the unit of Mpc.
+            -`zs`: float, the redshift of the source.
+            -`beta`: float, the lensing efficiency.
+                     If it is None, then calculate the beta from zd and zs.
+            -`nrmpc`: int. The number of the bins used for integration.
+            -`rmpc_offset_lo`: float, the lower bound of integrating radius offset in the unit of Mpc.
+            -`rmpc_offset_hi`: float, the higher bound of integrating radius offset in the unit of Mpc.
+            -`nrmpc_offset`: int, the number of binning for integrating radius offset in the unit of Mpc.
+            -`zs`: float, the redshift of the source.
+            -`beta`: float, the lensing efficiency.
+                     If it is None, then calculate the beta from zd and zs.
+            -`ntheta`: int. It is the number of bins for numerical integration.
+            -`mis_type`: string. It is the miscentering function given by different literature. see Poffset(rmpc, mis_type).
+
+        Return:
+            -`DetJ`: float or 1d numpy array, the determinant of Joacobian at rmpc.
+
+        """
+        return ( 1.0 - self.misKappaAtR(rmpc, zs = zs, beta = beta, rmpc_offset_lo = rmpc_offset_lo, rmpc_offset_hi = rmpc_offset_hi, nrmpc_offset = nrmpc_offset, ntheta = ntheta, mis_type = mis_type) )**2 - \
+                self.misTangentialShear(rmpc, zs = zs, beta = beta, nrmpc = nrmpc, rmpc_offset_lo = rmpc_offset_lo, rmpc_offset_hi = rmpc_offset_hi, nrmpc_offset = nrmpc_offset, ntheta = ntheta, mis_type = mis_type)**2
+
+    # ---
+    # det of Jacobian - the weak lensing regime
+    # ---
+    def misDetJ_weak(self, rmpc, zs = 1.0, beta = None, nrmpc = 2**8 + 2, rmpc_offset_lo = 1E-4, rmpc_offset_hi = 1E2, nrmpc_offset = 2**7 + 2, ntheta = 2**7 + 2, mis_type = "zitrin+12"):
+        """
+        This function calculates the det(Jacobian) at the radius in the unit of Mpc in the weak lensing regime - including miscentering.
+
+        It returns det(J) = 1.0 - 2.0 * Kappa
+        You can specify the lensing efficiency or zs, yourself.
+
+        Parameters:
+            -`rmpc`: float or 1d numpy array, the radius in the unit of Mpc.
+            -`zs`: float, the redshift of the source.
+            -`beta`: float, the lensing efficiency.
+                     If it is None, then calculate the beta from zd and zs.
+            -`nrmpc`: int. The number of the bins used for integration.
+            -`rmpc_offset_lo`: float, the lower bound of integrating radius offset in the unit of Mpc.
+            -`rmpc_offset_hi`: float, the higher bound of integrating radius offset in the unit of Mpc.
+            -`nrmpc_offset`: int, the number of binning for integrating radius offset in the unit of Mpc.
+            -`zs`: float, the redshift of the source.
+            -`beta`: float, the lensing efficiency.
+                     If it is None, then calculate the beta from zd and zs.
+            -`ntheta`: int. It is the number of bins for numerical integration.
+            -`mis_type`: string. It is the miscentering function given by different literature. see Poffset(rmpc, mis_type).
+
+        Return:
+            -`DetJ_weak`: float or 1d numpy array, the determinant of Joacobian at rmpc (weak lensing approach).
+
+        """
+        return 1.0 - 2.0 * self.misKappaAtR(rmpc, zs = zs, beta = beta, rmpc_offset_lo = rmpc_offset_lo, rmpc_offset_hi = rmpc_offset_hi, nrmpc_offset = nrmpc_offset, ntheta = ntheta, mis_type = mis_type)
+
+
+    # ---
+    # magnification factor - mu - which is 1 / detJ
+    # ---
+    def mismu(self, rmpc, zs = 1.0, beta = None, nrmpc = 2**8 + 2, rmpc_offset_lo = 1E-4, rmpc_offset_hi = 1E2, nrmpc_offset = 2**7 + 2, ntheta = 2**7 + 2, mis_type = "zitrin+12"):
+        """
+        This function calculates the magnification := 1.0 /det(Jacobian)
+        at the radius in the unit of Mpc - including miscentering.
+
+        It returns 1.0 / det(J) = 1.0/ ( (1.0 - Kappa)**2 - tangential**2 )
+        You can specify the lensing efficiency or zs, yourself.
+
+        Parameters:
+            -`rmpc`: float or 1d numpy array, the radius in the unit of Mpc.
+            -`zs`: float, the redshift of the source.
+            -`beta`: float, the lensing efficiency.
+                     If it is None, then calculate the beta from zd and zs.
+            -`nrmpc`: int. The number of the bins used for integration.
+            -`rmpc_offset_lo`: float, the lower bound of integrating radius offset in the unit of Mpc.
+            -`rmpc_offset_hi`: float, the higher bound of integrating radius offset in the unit of Mpc.
+            -`nrmpc_offset`: int, the number of binning for integrating radius offset in the unit of Mpc.
+            -`zs`: float, the redshift of the source.
+            -`beta`: float, the lensing efficiency.
+                     If it is None, then calculate the beta from zd and zs.
+            -`ntheta`: int. It is the number of bins for numerical integration.
+            -`mis_type`: string. It is the miscentering function given by different literature. see Poffset(rmpc, mis_type).
+
+        Return:
+            -`mu`: float or 1d numpy array, the magnification factor at rmpc.
+
+        """
+        return 1.0 / self.misDetJ(rmpc, zs = zs, beta = beta, nrmpc = nrmpc, rmpc_offset_lo = rmpc_offset_lo, rmpc_offset_hi = rmpc_offset_hi, nrmpc_offset = nrmpc_offset, ntheta = ntheta, mis_type = mis_type)
+
+
+    # ---
+    # magnification factor in the weak lensing regime - mu_weak
+    # ---
+    def mismu_weak(self, rmpc, zs = 1.0, beta = None, nrmpc = 2**8 + 2, rmpc_offset_lo = 1E-4, rmpc_offset_hi = 1E2, nrmpc_offset = 2**7 + 2, ntheta = 2**7 + 2, mis_type = "zitrin+12"):
+        """
+        This function calculates the magnification factor at the radius in the unit of Mpc in the weak lensing regime - including miscentering.
+
+        It returns 1.0 + 2 * Kappa
+        You can specify the lensing efficiency or zs, yourself.
+
+        Parameters:
+            -`rmpc`: float or 1d numpy array, the radius in the unit of Mpc.
+            -`zs`: float, the redshift of the source.
+            -`beta`: float, the lensing efficiency.
+                     If it is None, then calculate the beta from zd and zs.
+            -`nrmpc`: int. The number of the bins used for integration.
+            -`rmpc_offset_lo`: float, the lower bound of integrating radius offset in the unit of Mpc.
+            -`rmpc_offset_hi`: float, the higher bound of integrating radius offset in the unit of Mpc.
+            -`nrmpc_offset`: int, the number of binning for integrating radius offset in the unit of Mpc.
+            -`zs`: float, the redshift of the source.
+            -`beta`: float, the lensing efficiency.
+                     If it is None, then calculate the beta from zd and zs.
+            -`ntheta`: int. It is the number of bins for numerical integration.
+            -`mis_type`: string. It is the miscentering function given by different literature. see Poffset(rmpc, mis_type).
+
+        Return:
+            -`mu_weak`: float or 1d numpy array, the magnification factor (weak lensing approximated) at rmpc.
+
+        """
+        return 1.0 + 2.0 * self.misKappaAtR(rmpc, zs = zs, beta = beta, rmpc_offset_lo = rmpc_offset_lo, rmpc_offset_hi = rmpc_offset_hi, nrmpc_offset = nrmpc_offset, ntheta = ntheta, mis_type = mis_type)
+
+
+
+
+
+
+
+
+# ---
+# testing
+# ---
+if    __name__ == "__main__":
+
+    A = Halo(mass = 5E14)
+    rmpc            =   10.0**np.linspace(-1.5,1.0,100)
+    #rmpc_offset     =   10.0**np.linspace(-3.0,2.0,100)
+    #rmpc_offset_bins =   0.5*(rmpc_offset[1:] + rmpc_offset[:-1])
+    #rmpc_offset_steps=   (rmpc_offset[1:] - rmpc_offset[:-1])
+    centered_kappa  =   A.KappaAtR(rmpc)
+    mis_kappa       =   A.misKappaAtR(rmpc)
+    import matplotlib.pyplot as pyplt
+    pyplt.plot(rmpc, centered_kappa, "k-", rmpc, mis_kappa, "r-")
+    pyplt.xscale("log")
+    pyplt.ylabel("$\kappa(r)$")
+    pyplt.xlabel("$r / \mathrm{Mpc}$")
+    pyplt.show()
+
+    pyplt.plot(rmpc, A.TangentialShear(rmpc), "k-", rmpc, A.misTangentialShear(rmpc), "r-")
+    pyplt.xscale("log")
+    pyplt.ylabel("$\gamma(r)$")
+    pyplt.xlabel("$r / \mathrm{Mpc}$")
+    pyplt.show()
+
+    pyplt.plot(rmpc, A.mu(rmpc), "k-", rmpc, A.mismu(rmpc), "r-")
+    pyplt.xscale("log")
+    pyplt.ylabel("$\mu(r)$")
+    pyplt.xlabel("$r / \mathrm{Mpc}$")
+    pyplt.show()
