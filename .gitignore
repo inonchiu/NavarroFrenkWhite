@@ -10,3 +10,7 @@ build/lib/__init__.py
 build/lib/NFW.py
 
 NFW.pyc
+
+testNFW.ipynb
+
+.ipynb_checkpoints/testNFW-checkpoint.ipynb
