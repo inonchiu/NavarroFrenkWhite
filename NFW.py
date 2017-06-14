@@ -282,7 +282,7 @@ class Halo(object):
             the format of the cosmolopy module.
         """
         # sanity check
-        if  not ( (zd >  0.0) and (mass > 0.0) and (concen > 0.0) ):
+        if  not ( (zd >=  0.0) and (mass > 0.0) and (concen > 0.0) ):
             raise ValueError("The input halo params are wrong, (zd, mass, concen):", zd, mass, concen, ".")
 
         if  wrt not in ["crit", "mean"]:
